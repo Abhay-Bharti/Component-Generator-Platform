@@ -4,6 +4,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
+const { client: redisClient } = require('./config/redis');
 
 const app = express();
 app.use(cors());
@@ -17,6 +18,11 @@ mongoose.connect(process.env.MONGO_URI, {
     useUnifiedTopology: true,
 }).then(() => console.log('MongoDB connected'))
     .catch((err) => console.error('MongoDB connection error:', err));
+
+// Wait for Redis connection
+redisClient.on('ready', () => {
+    console.log('Redis connected and ready');
+});
 
 app.use('/api/auth', authRoutes);
 app.use('/api/sessions', sessionRoutes);

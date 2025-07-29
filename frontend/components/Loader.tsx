@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 
-const steps = ['C', 'Co', 'Cod', 'Code', 'Coder'];
-const interval = 180; // ms per step
+const steps = ['C', 'Co', 'Cod', 'Code', 'Coder', 'Coder.', 'Coder..', 'Coder...'];
+const interval = 300; // ms per step
 
 export default function Loader() {
   const [index, setIndex] = useState(0);

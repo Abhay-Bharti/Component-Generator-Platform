@@ -1,9 +1,13 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import Cookies from 'js-cookie';
 import axios from 'axios';
-import { LiveProvider, LivePreview, LiveError } from 'react-live';
-import { FaUser, FaRobot, FaTrash } from 'react-icons/fa';
+import ChatPanel from '../../components/ChatPanel/ChatPanel';
+import LivePreviewComponent from '../../components/LivePreview/LivePreview';
+import CodeEditor from '../../components/CodeEditor/CodeEditor';
+import PropertyEditor from '../../components/PropertyEditor/PropertyEditor';
+import ChatOverrides from '../../components/ChatOverrides/ChatOverrides';
+import Loader from '../../components/Loader';
 
 interface ChatMessage {
     role: 'user' | 'ai';
@@ -28,7 +32,10 @@ export default function SessionPage() {
     const [aiLoading, setAiLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
-    const chatEndRef = useRef<HTMLDivElement>(null);
+    const [selectedElement, setSelectedElement] = useState<any>(null);
+    const [showPropertyEditor, setShowPropertyEditor] = useState(false);
+    const [showChatOverrides, setShowChatOverrides] = useState(false);
+    const [isProcessingOverride, setIsProcessingOverride] = useState(false);
 
     useEffect(() => {
         if (!id) return;
@@ -52,10 +59,6 @@ export default function SessionPage() {
             })
             .finally(() => setLoading(false));
     }, [id, router]);
-
-    useEffect(() => {
-        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [chat]);
 
     // Auto-save chat and code after every update
     useEffect(() => {
@@ -121,92 +124,99 @@ export default function SessionPage() {
     const handleDeleteMessage = (index: number) => {
         setChat(prev => prev.filter((_, i) => i !== index));
     };
+
     // Clear all chat messages
     const handleClearChat = () => {
         setChat([]);
     };
 
-    if (loading) return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
+    // Handle element selection for property editor
+    const handleElementSelect = (element: any) => {
+        setSelectedElement(element);
+        setShowPropertyEditor(true);
+        setShowChatOverrides(false);
+    };
+
+    // Handle property changes
+    const handlePropertyChange = (elementId: string, property: string, value: string) => {
+        // This would update the CSS based on the property change
+        // For now, we'll add it to the CSS
+        const newCSS = `${code.css}\n/* Property override for ${elementId} */\n#${elementId} { ${property}: ${value}; }`;
+        setCode({ ...code, css: newCSS });
+    };
+
+    // Handle text changes
+    const handleTextChange = (elementId: string, text: string) => {
+        // This would update the JSX text content
+        // For now, we'll add a comment
+        const newJSX = `${code.jsx}\n{/* Text override for ${elementId}: ${text} */}`;
+        setCode({ ...code, jsx: newJSX });
+    };
+
+    // Handle chat override requests
+    const handleOverrideRequest = async (elementId: string, prompt: string) => {
+        setIsProcessingOverride(true);
+        try {
+            const token = Cookies.get('token');
+            const overridePrompt = `Modify the element with id "${elementId}" in the following React component. ${prompt}. Only return the updated JSX and CSS code blocks.`;
+
+            const res = await axios.post(`/api/sessions/${id}/chat`, { prompt: overridePrompt }, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+
+            setChat(res.data.chat);
+            setCode(res.data.code || { jsx: '', css: '' });
+            setShowChatOverrides(false);
+        } catch (err: any) {
+            setError('Failed to apply override. Please try again.');
+        } finally {
+            setIsProcessingOverride(false);
+        }
+    };
+
+    if (loading) return <Loader />;
     if (error) return <div className="flex flex-col items-center justify-center min-h-screen text-red-600">{error}</div>;
 
     return (
         <div className="flex flex-col md:flex-row min-h-screen">
             {/* Chat Side Panel */}
-            <div className="w-full md:w-1/3 bg-gray-50 p-4 flex flex-col border-r border-gray-200 min-h-screen">
-                <div className="flex items-center justify-between mb-2">
-                    <h2 className="text-xl font-semibold">Chat</h2>
-                    <button
-                        className="text-red-500 hover:text-red-700 text-sm flex items-center gap-1"
-                        onClick={handleClearChat}
-                        title="Clear all chat"
-                        aria-label="Clear all chat"
-                    >
-                        <FaTrash /> Clear All
-                    </button>
-                </div>
-                {saving && <div className="text-xs text-gray-400 mb-1">Saving...</div>}
-                <div className="flex-1 overflow-y-auto mb-2 max-h-[60vh] pr-2">
-                    {chat.length === 0 && <div className="text-gray-400 text-center mt-8">No messages yet.</div>}
-                    {chat.map((msg, i) => (
-                        <div key={i} className={`mb-4 flex items-start group ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                            {msg.role === 'ai' && <FaRobot className="text-blue-500 mr-2 mt-1" aria-label="AI" />}
-                            <div className={`relative max-w-[80%] px-4 py-2 rounded-lg shadow ${msg.role === 'user' ? 'bg-blue-100 text-right' : 'bg-green-100 text-left'}`}>
-                                <span>{msg.content}</span>
-                                <button
-                                    className="absolute top-1 right-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"
-                                    onClick={() => handleDeleteMessage(i)}
-                                    title="Delete message"
-                                    aria-label="Delete message"
-                                >
-                                    <FaTrash />
-                                </button>
-                            </div>
-                            {msg.role === 'user' && <FaUser className="text-gray-500 ml-2 mt-1" aria-label="User" />}
-                        </div>
-                    ))}
-                    <div ref={chatEndRef} />
-                </div>
-                <form onSubmit={handleSend} className="flex gap-2">
-                    <input
-                        type="text"
-                        value={input}
-                        onChange={e => setInput(e.target.value)}
-                        className="flex-1 p-2 border rounded"
-                        placeholder="Type your prompt..."
-                        disabled={sending || aiLoading}
-                    />
-                    <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded" disabled={sending || aiLoading}>
-                        {sending || aiLoading ? '...' : 'Send'}
-                    </button>
-                </form>
-            </div>
+            <ChatPanel
+                chat={chat}
+                input={input}
+                setInput={setInput}
+                onSend={handleSend}
+                onDeleteMessage={handleDeleteMessage}
+                onClearChat={handleClearChat}
+                sending={sending}
+                aiLoading={aiLoading}
+                saving={saving}
+            />
+
             {/* Main Preview Area */}
-            <div className="flex-1 p-6 flex flex-col">
-                <h2 className="text-xl font-semibold mb-2">Live Preview</h2>
-                <div className="border rounded bg-white min-h-[300px] mb-4 flex flex-col items-center justify-center">
-                    <LiveProvider code={code.jsx}>
-                        <LivePreview className="p-4" />
-                        <LiveError className="text-red-600 p-2" />
-                    </LiveProvider>
-                </div>
-                {/* Code Tabs */}
-                <div className="bg-gray-100 rounded p-4">
-                    <h3 className="font-semibold mb-2">JSX/TSX</h3>
-                    <textarea
-                        className="bg-white p-2 rounded overflow-x-auto mb-4 w-full h-40 border"
-                        value={code.jsx}
-                        onChange={e => setCode(c => ({ ...c, jsx: e.target.value }))}
-                        spellCheck={false}
-                    />
-                    <h3 className="font-semibold mb-2">CSS</h3>
-                    <textarea
-                        className="bg-white p-2 rounded overflow-x-auto w-full h-24 border"
-                        value={code.css}
-                        onChange={e => setCode(c => ({ ...c, css: e.target.value }))}
-                        spellCheck={false}
-                    />
-                </div>
+            <div className="flex-1 flex flex-col">
+                <LivePreviewComponent jsx={code.jsx} css={code.css} onElementSelect={handleElementSelect} />
+                <CodeEditor code={code} setCode={setCode} />
             </div>
+
+            {/* Property Editor */}
+            {showPropertyEditor && selectedElement && (
+                <PropertyEditor
+                    selectedElement={selectedElement}
+                    onClose={() => setShowPropertyEditor(false)}
+                    onPropertyChange={handlePropertyChange}
+                    onTextChange={handleTextChange}
+                />
+            )}
+
+            {/* Chat-Driven Overrides */}
+            {showChatOverrides && selectedElement && (
+                <ChatOverrides
+                    selectedElement={selectedElement}
+                    onClose={() => setShowChatOverrides(false)}
+                    onOverrideRequest={handleOverrideRequest}
+                    isProcessing={isProcessingOverride}
+                />
+            )}
         </div>
     );
 } 
